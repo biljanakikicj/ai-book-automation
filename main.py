@@ -39,6 +39,21 @@ model = genai.GenerativeModel(model_name="gemini-1.5-pro-latest",
 
 uploaded_files = []
 
+prompts = [
+    "Summarize this chapter in 100 words",
+    "Extract key points from this chapter",
+    "Analyze this chapter and provide insights",
+    "Generate a quiz based on this chapter"
+]
+
+file_name_bases = [
+    "Summary",
+    "KeyPoints",
+    "Analysis",
+    "Quiz"
+]
+
+
 # Define book variables 
 bucket_name = 'staging.ai-book-automation.appspot.com'
 file_name = 'The Art Of Systems Thinking.pdf'
@@ -75,10 +90,18 @@ def extract_pdf_pages(pathname: str) -> list[str]:
     doc.close()
     return full_text, pages_text
 
+def write_to_file(result, chapter, prompt, chapter_number):
+    file_name_base = file_name_bases[prompts.index(prompt)]
+    file_name = f"{file_name_base}_{chapter_number}.txt"
+    bucket = storage.Client().bucket(bucket_name)
+    blob = bucket.blob(file_name)
+    blob.upload_from_string(result)
+    print(f"Result written to {file_name} in bucket {bucket_name}")
+    
 def define_chapters(full_text):
     try:
         # Construct the input string with instruction
-        input_text = f"Please split this document into chapters: {full_text} Identify the chapter boundaries in the provided text based on the detected headings. Return a list of chapter titles and their corresponding contents."
+        input_text = f"Please split this document into logical chapters, with the full context for each chapter: {full_text}"
 
         # Making the API call directly with the constructed string
         response = model.generate_content(input_text)
@@ -88,7 +111,7 @@ def define_chapters(full_text):
 
         # Assuming the response has a 'text' attribute based on your last message
         if hasattr(response, 'text') and response.text:
-            return response.text
+            return response.text.split('--- CHAPTER ')  # Split the response into chapters
         else:
             print("No text returned in API response.")
             return []
@@ -97,11 +120,11 @@ def define_chapters(full_text):
         print(f"An error occurred: {e}")
         return []
 
-def write_to_file(result, chapter_title):
-    file_name = f"{chapter_title}.txt"
-    with open(file_name, "w") as f:
-        f.write(result)
-    print(f"Result written to {file_name}")
+def process_chapter(chapter, chapter_content, prompts):
+    for prompt in prompts:
+        result = model.generate_content(f"{prompt}: {chapter}")
+        write_to_file(result.text, chapter, prompt, chapter.split(' ')[1])
+
 
 def main():
     full_text, pages = extract_pdf_pages(pdf_path)
@@ -113,30 +136,13 @@ def main():
     # Generate summary and organized content
     chapters = define_chapters(full_text)
     print("Generated Chapters:")
-    print(chapters)
-
-    # Run different prompts for each chapter
     for chapter in chapters:
-        prompt1 = "Summarize the chapter in 100 words"
-        result1 = model.generate_content(prompt1)
-        # write_to_file(result1.text, chapter)
-        print(result1.text, chapter)
+        print(chapter)
 
-        prompt2 = "Extract key points from the chapter"
-        result2 = model.generate_content(prompt2)
-        print(result2.text, chapter)
 
-        prompt3 = "Analyze the chapter and provide insights"
-        result3 = model.generate_content(prompt3)
-        print(result3.text, chapter)
-
-        prompt4 = "Generate a quiz based on the chapter"
-        result4 = model.generate_content(prompt4)
-        print(result4.text, chapter)
-
-        # Optionally clean up by deleting uploaded files
-        for uploaded_file in uploaded_files:
-            genai.delete_file(name=uploaded_file.name)
+    for chapter in chapters:
+        process_chapter(chapter, chapter, prompts)
 
 if __name__ == "__main__":
     main()
+

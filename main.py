@@ -40,6 +40,11 @@ model = genai.GenerativeModel(model_name="gemini-1.5-pro-latest",
 uploaded_files = []
 
 prompts = [
+    "Give me a checklist of questions and answers from this chapter that I would have to answer to pass a test?",
+    "Give me the benefits taught in this chapter",
+    "Give me the headings and sub headings of each chapter?",
+    "Make a text soundbite for each heading and sub heading and summarizing each part",
+    "Write a one person dialog in first person for a VoiceOver speaking the sound bites? It wouldn't contain any bullets and would talk like a human.",
     "Summarize this chapter in 100 words",
     "Extract key points from this chapter",
     "Analyze this chapter and provide insights",
@@ -47,7 +52,11 @@ prompts = [
 ]
 
 file_name_bases = [
-    "Summary",
+    "QA",
+    "Benefits",
+    "Headings",
+    "Soundbites",
+    "DialogVoiceOver",
     "KeyPoints",
     "Analysis",
     "Quiz"
@@ -66,11 +75,16 @@ def upload_if_needed(pathname: str) -> list[str]:
     try:
         existing_file = genai.get_file(name=hash_id)
         return [existing_file.uri]
-    except:
+    except Exception as e:
+        print(f"Error getting file: {e}")
         pass
-    uploaded_file = genai.upload_file(path=path, display_name=hash_id)
-    uploaded_files.append(uploaded_file)
-    return [uploaded_file.uri]
+    try:
+        uploaded_file = genai.upload_file(path=path, display_name=hash_id)
+        uploaded_files.append(uploaded_file)
+        return [uploaded_file.uri]
+    except Exception as e:
+        print(f"Error uploading file: {e}")
+        return []
 
 def extract_pdf_pages(pathname: str) -> list[str]:
     # Download the file from Google Cloud Storage
@@ -92,7 +106,7 @@ def extract_pdf_pages(pathname: str) -> list[str]:
 
 def write_to_file(result, chapter, prompt, chapter_number):
     file_name_base = file_name_bases[prompts.index(prompt)]
-    file_name = f"{file_name_base}_{chapter_number}.txt"
+    file_name = f"Chapter_{chapter_number}_{file_name_base}.txt"
     bucket = storage.Client().bucket(bucket_name)
     blob = bucket.blob(file_name)
     blob.upload_from_string(result)
@@ -100,31 +114,27 @@ def write_to_file(result, chapter, prompt, chapter_number):
     
 def define_chapters(full_text):
     try:
-        # Construct the input string with instruction
         input_text = f"Please split this document into logical chapters, with the full context for each chapter: {full_text}"
-
-        # Making the API call directly with the constructed string
         response = model.generate_content(input_text)
-        
-        # Check and print the full response to understand its structure
         print("Full API Response:", response)
-
-        # Assuming the response has a 'text' attribute based on your last message
         if hasattr(response, 'text') and response.text:
             return response.text.split('--- CHAPTER ')  # Split the response into chapters
         else:
             print("No text returned in API response.")
             return []
     except Exception as e:
-        # Catch any type of exception and print it for debugging
         print(f"An error occurred: {e}")
         return []
 
 def process_chapter(chapter, chapter_content, prompts):
+    chapter_number = chapter.split(' ')[1]  # Extract chapter number from chapter title
     for prompt in prompts:
-        result = model.generate_content(f"{prompt}: {chapter}")
-        write_to_file(result.text, chapter, prompt, chapter.split(' ')[1])
-
+        try:
+            result = model.generate_content(f"{prompt}: {chapter}")
+            write_to_file(result.text, chapter, prompt, chapter_number)
+        except Exception as e:
+            print(f"Error generating content: {e}")
+            continue  # Move on to the next prompt
 
 def main():
     full_text, pages = extract_pdf_pages(pdf_path)
